@@ -199,7 +199,25 @@ class FullyConnectedNet(object):
         ############################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-        pass
+        # Размерности всех слоёв: [input, h1, h2, ..., hL, num_classes]
+        dims = [input_dim] + list(hidden_dims) + [num_classes]
+
+        # Инициализация весов и смещений для всех слоёв
+        for i in range(self.num_layers):
+            W_key = "W%d" % (i + 1)
+            b_key = "b%d" % (i + 1)
+
+            self.params[W_key] = weight_scale * np.random.randn(dims[i], dims[i + 1])
+            self.params[b_key] = np.zeros(dims[i + 1])
+
+        # Параметры batchnorm / layernorm для скрытых слоёв (1..L-1)
+        if self.normalization in ["batchnorm", "layernorm"]:
+            for i in range(self.num_layers - 1):
+                gamma_key = "gamma%d" % (i + 1)
+                beta_key = "beta%d" % (i + 1)
+                self.params[gamma_key] = np.ones(dims[i + 1])
+                self.params[beta_key] = np.zeros(dims[i + 1])
+            
 
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         ############################################################################
@@ -261,7 +279,59 @@ class FullyConnectedNet(object):
         ############################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-        pass
+        out = X
+        caches = {}          # кэши для backprop по слоям
+        dropout_caches = {}  # кэши для dropout
+
+        # Прямой проход по скрытым слоям: {affine - [norm] - relu - [dropout]} x (L-1)
+        for i in range(1, self.num_layers):
+            W = self.params["W%d" % i]
+            b = self.params["b%d" % i]
+
+            if self.normalization == "batchnorm":
+                gamma = self.params["gamma%d" % i]
+                beta = self.params["beta%d" % i]
+                bn_param = self.bn_params[i - 1]
+
+                # affine
+                a, fc_cache = affine_forward(out, W, b)
+                # batchnorm
+                bn, bn_cache = batchnorm_forward(a, gamma, beta, bn_param)
+                # relu
+                out, relu_cache = relu_forward(bn)
+
+                cache = (fc_cache, bn_cache, relu_cache)
+
+            elif self.normalization == "layernorm":
+                gamma = self.params["gamma%d" % i]
+                beta = self.params["beta%d" % i]
+                ln_param = self.bn_params[i - 1]
+
+                # affine
+                a, fc_cache = affine_forward(out, W, b)
+                # layernorm
+                ln, ln_cache = layernorm_forward(a, gamma, beta, ln_param)
+                # relu
+                out, relu_cache = relu_forward(ln)
+
+                cache = (fc_cache, ln_cache, relu_cache)
+
+            else:
+                # Без нормализации: просто affine - relu
+                out, cache = affine_relu_forward(out, W, b)
+
+            # Dropout, если включён
+            if self.use_dropout:
+                out, do_cache = dropout_forward(out, self.dropout_param)
+                dropout_caches[i] = do_cache
+
+            caches[i] = cache
+
+        # Последний слой: affine → scores
+        W_last = self.params["W%d" % self.num_layers]
+        b_last = self.params["b%d" % self.num_layers]
+        scores, cache_last = affine_forward(out, W_last, b_last)
+        caches[self.num_layers] = cache_last
 
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         ############################################################################
@@ -288,7 +358,66 @@ class FullyConnectedNet(object):
         ############################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-        pass
+        # Считаем data loss и градиент по scores через softmax
+        loss, dscores = softmax_loss(scores, y)
+
+        # Добавляем L2-регуляризацию по всем W
+        for i in range(1, self.num_layers + 1):
+            W = self.params["W%d" % i]
+            loss += 0.5 * self.reg * np.sum(W * W)
+
+        grads = {}
+
+        # Обратный проход для последнего слоя (чистый affine)
+        dx, dW, db = affine_backward(dscores, caches[self.num_layers])
+        W_last = self.params["W%d" % self.num_layers]
+        dW += self.reg * W_last
+        grads["W%d" % self.num_layers] = dW
+        grads["b%d" % self.num_layers] = db
+
+        dout_hidden = dx  # градиент, который пойдёт в L-1 слой
+
+        # Обратный проход по скрытым слоям: i = L-1 .. 1
+        for i in reversed(range(1, self.num_layers)):
+            # Dropout backward (если использовали)
+            if self.use_dropout:
+                dout_hidden = dropout_backward(dout_hidden, dropout_caches[i])
+
+            W = self.params["W%d" % i]
+
+            if self.normalization == "batchnorm":
+                fc_cache, bn_cache, relu_cache = caches[i]
+
+                # relu backward
+                dbn = relu_backward(dout_hidden, relu_cache)
+                # batchnorm backward
+                da, dgamma, dbeta = batchnorm_backward(dbn, bn_cache)
+                # affine backward
+                dx, dW, db = affine_backward(da, fc_cache)
+
+                grads["gamma%d" % i] = dgamma
+                grads["beta%d" % i] = dbeta
+
+            elif self.normalization == "layernorm":
+                fc_cache, ln_cache, relu_cache = caches[i]
+
+                dln = relu_backward(dout_hidden, relu_cache)
+                da, dgamma, dbeta = layernorm_backward(dln, ln_cache)
+                dx, dW, db = affine_backward(da, fc_cache)
+
+                grads["gamma%d" % i] = dgamma
+                grads["beta%d" % i] = dbeta
+
+            else:
+                # Без нормализации: affine - relu backward
+                dx, dW, db = affine_relu_backward(dout_hidden, caches[i])
+
+            dW += self.reg * W
+            grads["W%d" % i] = dW
+            grads["b%d" % i] = db
+
+            dout_hidden = dx
+
 
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         ############################################################################

@@ -176,7 +176,19 @@ def batchnorm_forward(x, gamma, beta, bn_param):
         #######################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-        pass
+        sample_mean = np.mean(x, axis=0)          # (D,)
+        sample_var  = np.var(x, axis=0)           # (D,)
+
+        x_mu = x - sample_mean                    # (N, D)
+        std = np.sqrt(sample_var + eps)           # (D,)
+        x_hat = x_mu / std                        # (N, D)
+
+        out = gamma * x_hat + beta                # (N, D)
+
+        running_mean = momentum * running_mean + (1 - momentum) * sample_mean
+        running_var  = momentum * running_var  + (1 - momentum) * sample_var
+
+        cache = (x, x_hat, sample_mean, sample_var, gamma, beta, eps)
 
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         #######################################################################
@@ -191,7 +203,10 @@ def batchnorm_forward(x, gamma, beta, bn_param):
         #######################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-        pass
+        x_hat = (x - running_mean) / np.sqrt(running_var + eps)
+        out = gamma * x_hat + beta
+        cache = None
+
 
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         #######################################################################
@@ -233,7 +248,27 @@ def batchnorm_backward(dout, cache):
     ###########################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
+    x, x_hat, mean, var, gamma, beta, eps = cache
+    N, D = dout.shape
+    # Градиенты по gamma и beta
+    dbeta = np.sum(dout, axis=0)
+    dgamma = np.sum(dout * x_hat, axis=0)
+
+    # Градиент по x_hat
+    dxhat = dout * gamma                       # (N, D)
+
+    # Вспомогательные величины
+    std = np.sqrt(var + eps)                   # (D,)
+    x_mu = x - mean                            # (N, D)
+
+    # Градиент по var
+    dvar = np.sum(dxhat * x_mu * (-0.5) * (var + eps) ** (-3.0 / 2.0), axis=0)  # (D,)
+
+    # Градиент по mean
+    dmean = np.sum(dxhat * (-1.0 / std), axis=0) + dvar * np.mean(-2.0 * x_mu, axis=0)  # (D,)
+
+    # Градиент по x
+    dx = dxhat / std + dvar * (2.0 * x_mu / N) + dmean / N   # (N, D)
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ###########################################################################
@@ -291,7 +326,8 @@ def dropout_forward(x, dropout_param):
         #######################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-        pass
+      mask = (np.random.rand(*x.shape) < p) / p
+      out = x * mask
 
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         #######################################################################
@@ -303,7 +339,8 @@ def dropout_forward(x, dropout_param):
         #######################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-        pass
+      out = x
+      mask = None
 
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         #######################################################################
@@ -334,7 +371,7 @@ def dropout_backward(dout, cache):
         #######################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-        pass
+        dx = dout * mask
 
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         #######################################################################
@@ -380,7 +417,36 @@ def conv_forward_naive(x, w, b, conv_param):
     ###########################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
+    # Извлекаем параметры
+    stride = conv_param["stride"]
+    pad    = conv_param["pad"]
+
+    N, C, H, W = x.shape          # вход
+    F, _, HH, WW = w.shape        # фильтры
+
+    # Размеры выходной карты признаков
+    H_out = 1 + (H + 2 * pad - HH) // stride
+    W_out = 1 + (W + 2 * pad - WW) // stride
+
+    # Паддинг по пространственным осям (H, W)
+    x_padded = np.pad(
+        x,
+        ((0, 0), (0, 0), (pad, pad), (pad, pad)),
+        mode="constant"
+    )
+
+    # Инициализируем выход
+    out = np.zeros((N, F, H_out, W_out))
+
+    # Наивная реализация: 4 вложенных цикла
+    for n in range(N):             # по объектам в батче
+        for f in range(F):         # по фильтрам
+            for i in range(H_out):
+                for j in range(W_out):
+                    h0 = i * stride
+                    w0 = j * stride
+                    window = x_padded[n, :, h0:h0+HH, w0:w0+WW]   # (C, HH, WW)
+                    out[n, f, i, j] = np.sum(window * w[f]) + b[f]
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ###########################################################################
@@ -409,7 +475,51 @@ def conv_backward_naive(dout, cache):
     ###########################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
+    x, w, b, conv_param = cache
+    stride = conv_param["stride"]
+    pad    = conv_param["pad"]
+
+    N, C, H, W = x.shape
+    F, _, HH, WW = w.shape
+    _, _, H_out, W_out = dout.shape
+
+    # Паддинг входа, как в прямом проходе
+    x_padded = np.pad(
+        x,
+        ((0, 0), (0, 0), (pad, pad), (pad, pad)),
+        mode="constant"
+    )
+    dx_padded = np.zeros_like(x_padded)
+    dw = np.zeros_like(w)
+    db = np.zeros_like(b)
+
+    # db: градиент по смещениям — просто сумма по всем примерам и пространственным координатам
+    for f in range(F):
+        db[f] = np.sum(dout[:, f, :, :])
+
+    # Основной цикл: по всем осям
+    for n in range(N):          # по объектам
+        for f in range(F):      # по фильтрам
+            for i in range(H_out):
+                for j in range(W_out):
+                    h0 = i * stride
+                    w0 = j * stride
+
+                    # участок входа, к которому применён фильтр
+                    window = x_padded[n, :, h0:h0+HH, w0:w0+WW]   # (C, HH, WW)
+                    d_out = dout[n, f, i, j]
+
+                    # dW_f: градиент по фильтру f
+                    dw[f] += window * d_out
+
+                    # dX: градиент по входу (через паддинг)
+                    dx_padded[n, :, h0:h0+HH, w0:w0+WW] += w[f] * d_out
+
+    # Убираем паддинг, чтобы вернуться к форме (N, C, H, W)
+    if pad > 0:
+        dx = dx_padded[:, :, pad:-pad, pad:-pad]
+    else:
+        dx = dx_padded
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ###########################################################################
@@ -443,7 +553,27 @@ def max_pool_forward_naive(x, pool_param):
     ###########################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
+    N, C, H, W = x.shape
+    pool_height = pool_param["pool_height"]
+    pool_width  = pool_param["pool_width"]
+    stride      = pool_param["stride"]
+
+    # Размеры выходной карты после pooling
+    H_out = 1 + (H - pool_height) // stride
+    W_out = 1 + (W - pool_width)  // stride
+
+    out = np.zeros((N, C, H_out, W_out))
+
+    # Наивная реализация: 4 вложенных цикла
+    for n in range(N):          # по объектам
+        for c in range(C):      # по каналам
+            for i in range(H_out):
+                for j in range(W_out):
+                    h0 = i * stride
+                    w0 = j * stride
+
+                    window = x[n, c, h0:h0+pool_height, w0:w0+pool_width]
+                    out[n, c, i, j] = np.max(window)
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ###########################################################################
@@ -470,7 +600,35 @@ def max_pool_backward_naive(dout, cache):
     ###########################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
+    x, pool_param = cache
+    N, C, H, W = x.shape
+
+    pool_height = pool_param["pool_height"]
+    pool_width  = pool_param["pool_width"]
+    stride      = pool_param["stride"]
+
+    H_out = 1 + (H - pool_height) // stride
+    W_out = 1 + (W - pool_width)  // stride
+
+    dx = np.zeros_like(x)
+
+    # Наивный backward: для каждого окна передаём градиент только в максимум
+    for n in range(N):          # по объектам
+        for c in range(C):      # по каналам
+            for i in range(H_out):
+                for j in range(W_out):
+                    h0 = i * stride
+                    w0 = j * stride
+
+                    window = x[n, c, h0:h0+pool_height, w0:w0+pool_width]
+                    m = np.max(window)
+
+                    # маска максимумов в окне
+                    mask = (window == m)
+
+                    # градиент распространяется только туда, где был максимум
+                    dx[n, c, h0:h0+pool_height, w0:w0+pool_width] += \
+                        mask * dout[n, c, i, j]
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ###########################################################################
