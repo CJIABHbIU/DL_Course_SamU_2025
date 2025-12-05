@@ -1,7 +1,6 @@
 from builtins import range
 import numpy as np
 from random import shuffle
-from past.builtins import xrange
 
 def softmax_loss_naive(W, X, y, reg):
     """
@@ -33,7 +32,33 @@ def softmax_loss_naive(W, X, y, reg):
     #############################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
+    num_train = X.shape[0]
+    num_classes = W.shape[1]
+
+    for i in range(num_train):
+        scores = X[i].dot(W)                         # (C,)
+        # численная стабильность
+        scores -= np.max(scores)
+        exp_scores = np.exp(scores)
+        probs = exp_scores / np.sum(exp_scores)      # (C,)
+
+        loss += -np.log(probs[y[i]])
+
+        # градиент
+        for j in range(num_classes):
+            p = probs[j]
+            if j == y[i]:
+                dW[:, j] += (p - 1.0) * X[i]
+            else:
+                dW[:, j] += p * X[i]
+
+    # усреднение
+    loss /= num_train
+    dW   /= num_train
+
+    # регуляризация
+    loss += 0.5 * reg * np.sum(W * W)
+    dW   += reg * W
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
@@ -58,7 +83,28 @@ def softmax_loss_vectorized(W, X, y, reg):
     #############################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
+    num_train = X.shape[0]
+
+    # scores: (N, C)
+    scores = X.dot(W)
+    scores -= np.max(scores, axis=1, keepdims=True)      # стабилизация
+
+    exp_scores = np.exp(scores)
+    probs = exp_scores / np.sum(exp_scores, axis=1, keepdims=True)   # (N, C)
+
+    # loss
+    correct_class_probs = probs[np.arange(num_train), y]
+    loss = -np.sum(np.log(correct_class_probs))
+    loss /= num_train
+    loss += 0.5 * reg * np.sum(W * W)
+
+    # gradient
+    dscores = probs.copy()               # (N, C)
+    dscores[np.arange(num_train), y] -= 1.0
+    dscores /= num_train
+
+    dW = X.T.dot(dscores)                # (D, N) @ (N, C) -> (D, C)
+    dW += reg * W
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
