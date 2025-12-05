@@ -22,6 +22,7 @@ class TwoLayerNet(object):
     self.params that maps parameter names to numpy arrays.
     """
 
+    
     def __init__(
         self,
         input_dim=3 * 32 * 32,
@@ -30,32 +31,14 @@ class TwoLayerNet(object):
         weight_scale=1e-3,
         reg=0.0,
     ):
-        """
-        Initialize a new network.
-
-        Inputs:
-        - input_dim: An integer giving the size of the input
-        - hidden_dim: An integer giving the size of the hidden layer
-        - num_classes: An integer giving the number of classes to classify
-        - weight_scale: Scalar giving the standard deviation for random
-          initialization of the weights.
-        - reg: Scalar giving L2 regularization strength.
-        """
         self.params = {}
         self.reg = reg
 
-        ############################################################################
-        # TODO: Initialize the weights and biases of the two-layer net. Weights    #
-        # should be initialized from a Gaussian centered at 0.0 with               #
-        # standard deviation equal to weight_scale, and biases should be           #
-        # initialized to zero. All weights and biases should be stored in the      #
-        # dictionary self.params, with first layer weights                         #
-        # and biases using the keys 'W1' and 'b1' and second layer                 #
-        # weights and biases using the keys 'W2' and 'b2'.                         #
-        ############################################################################
-        # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
+        self.params["W1"] = weight_scale * np.random.randn(input_dim, hidden_dim)
+        self.params["b1"] = np.zeros(hidden_dim)
 
-        pass
+        self.params["W2"] = weight_scale * np.random.randn(hidden_dim, num_classes)
+        self.params["b2"] = np.zeros(num_classes)
 
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         ############################################################################
@@ -88,7 +71,12 @@ class TwoLayerNet(object):
         ############################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-        pass
+        W1, b1 = self.params["W1"], self.params["b1"]
+        W2, b2 = self.params["W2"], self.params["b2"]
+
+        a1, fc1_cache = affine_forward(X, W1, b1)
+        h1, relu_cache = relu_forward(a1)
+        scores, fc2_cache = affine_forward(h1, W2, b2)
 
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         ############################################################################
@@ -112,7 +100,26 @@ class TwoLayerNet(object):
         ############################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-        pass
+        loss, dscores = softmax_loss(scores, y)
+
+        # Add L2 regularization
+        loss += 0.5 * self.reg * (np.sum(W1 * W1) + np.sum(W2 * W2))
+
+        grads = {}
+
+        dh1, dW2, db2 = affine_backward(dscores, fc2_cache)
+
+        dW2 += self.reg * W2  # reg gradient
+        grads["W2"] = dW2
+        grads["b2"] = db2
+
+        da1 = relu_backward(dh1, relu_cache)
+
+        dX, dW1, db1 = affine_backward(da1, fc1_cache)
+
+        dW1 += self.reg * W1
+        grads["W1"] = dW1
+        grads["b1"] = db1
 
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         ############################################################################

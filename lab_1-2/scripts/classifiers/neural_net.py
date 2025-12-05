@@ -63,7 +63,7 @@ class TwoLayerNet(object):
 
         correct_logprobs = -np.log(probs[np.arange(N), y])
         data_loss = np.mean(correct_logprobs)
-        reg_loss = 0.5 * reg * (np.sum(W1 * W1) + np.sum(W2 * W2))
+        reg_loss = reg * (np.sum(W1 * W1) + np.sum(W2 * W2))
         loss = data_loss + reg_loss
 
         grads = {}
@@ -73,21 +73,21 @@ class TwoLayerNet(object):
         dscores /= N                      # усреднение по батчу
 
         # градиенты по W2 и b2
-        dW2 = hidden_relu.T.dot(dscores)  # (H, N) @ (N, C) -> (H, C)
-        db2 = np.sum(dscores, axis=0)     # (C,)
+        dW2 = hidden_relu.T.dot(dscores)
+        db2 = np.sum(dscores, axis=0)
 
-        dW2 += reg * W2                   # L2
+        dW2 += 2 * reg * W2
 
         # градиент по скрытому слою после ReLU
-        dhidden = dscores.dot(W2.T)       # (N, C) @ (C, H) -> (N, H)
+        dhidden = dscores.dot(W2.T)      # (N, C) @ (C, H) -> (N, H)
         # ReLU back: зануляем там, где до ReLU было ≤ 0
         dhidden[hidden <= 0] = 0
 
         # градиенты по W1 и b1
-        dW1 = X.T.dot(dhidden)            # (D, N) @ (N, H) -> (D, H)
-        db1 = np.sum(dhidden, axis=0)     # (H,)
-
-        dW1 += reg * W1                   # L2
+        dW1 = X.T.dot(dhidden)
+        db1 = np.sum(dhidden, axis=0)
+        
+        dW1 += 2 * reg * W1
 
         grads['W1'] = dW1
         grads['b1'] = db1
